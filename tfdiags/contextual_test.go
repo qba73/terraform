@@ -536,8 +536,12 @@ simple_attr = "val"
 		t.Run(fmt.Sprintf("%d:%s", i, tc.Diag.Description()), func(t *testing.T) {
 			var diags Diagnostics
 			diags = diags.Append(tc.Diag)
-			gotDiags := diags.InConfigBody(f.Body)
+			gotDiags := diags.InConfigBody(f.Body, "test.addr")
 			gotRange := gotDiags[0].Source().Subject
+
+			if gotDiags[0].Description().Address != "test.addr" {
+				t.Error("missing detail address")
+			}
 
 			for _, problem := range deep.Equal(gotRange, tc.ExpectedRange) {
 				t.Error(problem)
@@ -564,4 +568,8 @@ func TestGetAttribute(t *testing.T) {
 	if !reflect.DeepEqual(path, p) {
 		t.Fatalf("paths don't match:\nexpected: %#v\ngot: %#v", path, p)
 	}
+}
+
+func TestDiagnosticAddress(t *testing.T) {
+
 }
