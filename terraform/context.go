@@ -256,6 +256,17 @@ func NewContext(opts *ContextOpts) (*Context, tfdiags.Diagnostics) {
 	switch opts.PlanMode {
 	case plans.NormalMode, plans.DestroyMode:
 		// OK
+	case plans.RefreshOnlyMode:
+		if opts.SkipRefresh {
+			// The CLI layer (and other similar callers) should prevent this
+			// combination of options.
+			diags = diags.Append(tfdiags.Sourceless(
+				tfdiags.Error,
+				"Incompatible plan options",
+				"Cannot skip refreshing in refresh-only mode. This is a bug in Terraform.",
+			))
+			return nil, diags
+		}
 	default:
 		// The CLI layer (and other similar callers) should not try to
 		// create a context for a mode that Terraform Core doesn't support.
@@ -551,8 +562,10 @@ The -target option is not for routine use, and is provided only for exceptional 
 		plan, planDiags = c.plan()
 	case plans.DestroyMode:
 		plan, planDiags = c.destroyPlan()
+	case plans.RefreshOnlyMode:
+		plan, planDiags = c.refreshOnlyPlan()
 	default:
-		panic(fmt.Sprintf("nsupported plan mode %s", c.planMode))
+		panic(fmt.Sprintf("unsupported plan mode %s", c.planMode))
 	}
 	diags = diags.Append(planDiags)
 	if diags.HasErrors() {
@@ -656,8 +669,36 @@ func (c *Context) destroyPlan() (*plans.Plan, tfdiags.Diagnostics) {
 		return nil, diags
 	}
 
+	destroyPlan.Mode = plans.DestroyMode
 	destroyPlan.Changes = c.changes
 	return destroyPlan, diags
+}
+
+func (c *Context) refreshOnlyPlan() (*plans.Plan, tfdiags.Diagnostics) {
+	var diags tfdiags.Diagnostics
+
+	if c.skipRefresh {
+		// This is an unreasonable combination that should be blocked before
+		// we reach this point.
+		panic("can't skip refresh in refresh-only plan mode")
+	}
+
+	// A "refresh" is really just a plan where we keep the updated state
+	// but discard the changes.
+	// FIXME: This doesn't seem quite right, because we ought to skip
+	// running PlanResourceChange operations altogether in this mode.
+	plan, moreDiags := c.plan()
+	diags = diags.Append(moreDiags)
+	if diags.HasErrors() {
+		return nil, diags
+	}
+
+	// Discard the changes, keeping only the updated state.
+	plan.Mode = plans.RefreshOnlyMode
+	plan.Changes = plans.NewChanges()
+	c.changes = plan.Changes
+
+	return plan, diags
 }
 
 // Refresh goes through all the resources in the state and refreshes them
